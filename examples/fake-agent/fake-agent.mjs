@@ -80,7 +80,6 @@ function extractArtifactPath(line) {
 
 async function writeHandoffArtifact(mdPath) {
   const dir = path.dirname(mdPath);
-  const jsonPath = path.join(dir, 'handoff.json');
   const seqMatch = path.basename(dir).match(/^(\d+)-/);
   const seq = seqMatch ? Number.parseInt(seqMatch[1], 10) : 0;
 
@@ -121,23 +120,12 @@ async function writeHandoffArtifact(mdPath) {
     '',
   ].join('\n');
 
-  const json = {
-    version: '1',
-    seq,
-    tool: 'claude-code',
-    sessionId: 'fake-session',
-    createdAt: new Date().toISOString(),
-    cwd,
-    gitHead: null,
-    gitDirty: false,
-    contextPctAtHandoff: Math.round(pct * 100),
-    previousHandoff: null,
-    status: 'pending',
-  };
-
+  // A real agent writes ONLY handoff.md — batonpass's orchestrator writes the
+  // machine-owned handoff.json itself. The fake agent mirrors that (it used to
+  // also write a schema-correct handoff.json, which masked the orchestrator not
+  // writing one at all — the bug real-CLI testing surfaced).
   await fs.mkdir(dir, { recursive: true });
   await writeAtomic(mdPath, md);
-  await writeAtomic(jsonPath, JSON.stringify(json, null, 2) + '\n');
 }
 
 async function main() {

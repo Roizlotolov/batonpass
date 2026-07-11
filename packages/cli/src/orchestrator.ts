@@ -1,14 +1,19 @@
 /* eslint-disable @typescript-eslint/no-unsafe-declaration-merging -- standard typed-EventEmitter pattern (class + declare interface) */
+import { execFileSync } from 'node:child_process';
 import { EventEmitter } from 'node:events';
+import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import {
-  ArtifactValidationError,
   correctivePrompt,
   isSafeHandoffDirName,
+  parseHandoffMd,
   readHandoff,
   resumePromptPtyType,
+  validateHandoffMd,
+  writeFileAtomic,
   type Adapter,
   type Config,
+  type HandoffJson,
 } from '@batonpass/core';
 import { BatonpassPaths, acquireLockForced, ensureBatonpassDir, readState, releaseLock, updateState } from '@batonpass/core';
 import type { PtyProcess, PtySpawnFn } from './pty.js';
@@ -79,6 +84,7 @@ export class Orchestrator extends EventEmitter {
   private runPromise: Promise<void> | null = null;
   private hasOutput = false;
   private lastDataAtMs = 0;
+  private lastUsagePct = 0;
 
   constructor(opts: OrchestratorOptions) {
     super();
@@ -274,8 +280,9 @@ export class Orchestrator extends EventEmitter {
       if (this.stopRequested) return 'stop-requested';
 
       const usage = await this.adapter.usageSource({ cwd: this.cwd, sessionId: null, sinceMs: this.sessionSinceMs }).getUsage();
-      if (usage && usage.pct >= this.config.threshold) {
-        return 'threshold';
+      if (usage) {
+        this.lastUsagePct = usage.pct;
+        if (usage.pct >= this.config.threshold) return 'threshold';
       }
       await this.sleep(this.config.pollIntervalMs);
     }
@@ -291,69 +298,129 @@ export class Orchestrator extends EventEmitter {
     }
   }
 
-  /** Inject the handoff prompt, await + validate the artifact (with one corrective retry). */
+  /**
+   * Inject the handoff prompt, wait for the AGENT to write a valid handoff.md, then
+   * write the machine-owned handoff.json ourselves and validate the pair. The agent is
+   * only ever asked for handoff.md; handoff.json is batonpass's responsibility (see
+   * docs/spec.md — it carries tool/session/git metadata the agent can't know), so we
+   * never make the agent guess its schema. One corrective retry on an invalid md.
+   */
   private async performHandoffCycle(): Promise<'ok' | 'fallback'> {
     const state = await readState(this.paths);
     const nextSeq = state.lastSeq + 1;
-    const createdAtGuess = new Date(this.now()).toISOString();
-    const artifactPath = `${this.paths.handoffsDir}/${nextSeq}-${createdAtGuess.replace(/[:.]/g, '-')}/handoff.md`;
+    const createdAt = new Date(this.now()).toISOString();
+    const previousHandoff = await this.latestHandoffDirName();
+    const artifactPath = `${this.paths.handoffsDir}/${nextSeq}-${createdAt.replace(/[:.]/g, '-')}/handoff.md`;
 
     this.setState('INJECT_HANDOFF_PROMPT');
     this.forwardingInput = false; // queue any user keystrokes until injection settles
     if (this.child) await this.adapter.injectHandoffPrompt(this.child, artifactPath);
 
-    const primaryOk = await this.awaitArtifact(artifactPath);
-    if (primaryOk) {
-      this.flushQueuedInput();
-      return this.finalizeHandoff(artifactPath, nextSeq);
-    }
-
-    // One corrective retry.
-    let issues: string[] = ['handoff.md was not found before the timeout elapsed.'];
-    try {
-      await readHandoff(path.dirname(artifactPath));
-      issues = []; // exists after all (race) — fall through to validation below
-    } catch (err) {
-      if (err instanceof ArtifactValidationError) issues = err.issues;
-    }
-
-    if (this.child) {
-      this.child.write(correctivePrompt(artifactPath, issues));
+    let result = await this.awaitAgentMd(artifactPath);
+    if (!result.ok && this.child) {
+      // One corrective retry with the specific md problems.
+      this.child.write(correctivePrompt(artifactPath, result.issues));
       this.child.write('\r');
+      result = await this.awaitAgentMd(artifactPath);
     }
-    const retryOk = await this.awaitArtifact(artifactPath);
     this.flushQueuedInput();
-    if (retryOk) return this.finalizeHandoff(artifactPath, nextSeq);
+    if (!result.ok) return 'fallback';
 
-    return 'fallback';
+    return this.finalizeHandoff(artifactPath, nextSeq, createdAt, previousHandoff);
   }
 
-  private async finalizeHandoff(artifactPath: string, seq: number): Promise<'ok' | 'fallback'> {
+  /**
+   * Write handoff.json (machine-owned metadata), then validate the full md+json pair and
+   * record the handoff in state so the next session's resume can pick it up.
+   */
+  private async finalizeHandoff(
+    artifactPath: string,
+    seq: number,
+    createdAt: string,
+    previousHandoff: string | null,
+  ): Promise<'ok' | 'fallback'> {
     this.setState('VALIDATE_ARTIFACT');
+    const dir = path.dirname(artifactPath);
+    const meta: HandoffJson = {
+      version: '1',
+      seq,
+      tool: this.adapter.id,
+      sessionId: (await this.currentSessionId()) ?? 'auto',
+      createdAt,
+      cwd: this.cwd,
+      gitHead: this.gitHead(),
+      gitDirty: this.gitDirty(),
+      contextPctAtHandoff: Math.max(0, Math.min(200, Math.round(this.lastUsagePct * 100))),
+      previousHandoff,
+      status: 'pending',
+    };
     try {
-      await readHandoff(path.dirname(artifactPath));
+      await writeFileAtomic(path.join(dir, 'handoff.json'), JSON.stringify(meta, null, 2) + '\n');
+      await readHandoff(dir); // integrity check on the full md+json pair
     } catch {
       return 'fallback';
     }
-    const dirName = path.basename(path.dirname(artifactPath));
-    await updateState(this.paths, (s) => ({ ...s, lastSeq: seq, pendingHandoff: dirName }));
+    await updateState(this.paths, (s) => ({ ...s, lastSeq: seq, pendingHandoff: path.basename(dir) }));
     return 'ok';
   }
 
-  private async awaitArtifact(artifactPath: string): Promise<boolean> {
+  /** Wait for the agent to signal done AND to have written a schema-valid handoff.md. */
+  private async awaitAgentMd(artifactPath: string): Promise<{ ok: boolean; issues: string[] }> {
     this.setState('AWAIT_ARTIFACT');
     const deadline = this.now() + this.config.handoffTimeoutMs;
+    let issues: string[] = ['handoff.md was not found before the timeout elapsed.'];
     for (;;) {
       if (this.ring.includes(HANDOFF_WRITTEN_SENTINEL)) {
         try {
-          await readHandoff(path.dirname(artifactPath));
-          return true;
+          const text = await fs.readFile(artifactPath, 'utf8');
+          const mdIssues = validateHandoffMd(parseHandoffMd(text));
+          if (mdIssues.length === 0) return { ok: true, issues: [] };
+          issues = mdIssues;
         } catch {
-          // sentinel seen but file not valid/ready yet — keep polling until timeout
+          issues = [`missing or unreadable file: ${artifactPath}`];
         }
       }
-      if (this.now() >= deadline) return false;
+      if (this.now() >= deadline) return { ok: false, issues };
       await this.sleep(Math.min(this.config.pollIntervalMs, 250));
+    }
+  }
+
+  /** Directory name of the most recent existing handoff (for the chain link), or null. */
+  private async latestHandoffDirName(): Promise<string | null> {
+    try {
+      const entries = (await fs.readdir(this.paths.handoffsDir))
+        .filter((e) => /^\d+-/.test(e))
+        .sort((a, b) => Number.parseInt(a, 10) - Number.parseInt(b, 10));
+      return entries.length > 0 ? entries[entries.length - 1] : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Best-effort session id from the turn-idle marker the adapter's Stop hook writes. */
+  private async currentSessionId(): Promise<string | null> {
+    try {
+      const raw = await fs.readFile(path.join(this.cwd, '.batonpass', 'turn-idle'), 'utf8');
+      const parsed = JSON.parse(raw) as { sessionId?: string };
+      return parsed.sessionId && parsed.sessionId.length > 0 ? parsed.sessionId : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private gitHead(): string | null {
+    try {
+      return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: this.cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim() || null;
+    } catch {
+      return null;
+    }
+  }
+
+  private gitDirty(): boolean {
+    try {
+      return execFileSync('git', ['status', '--porcelain'], { cwd: this.cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim().length > 0;
+    } catch {
+      return false;
     }
   }
 
