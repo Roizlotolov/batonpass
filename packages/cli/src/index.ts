@@ -45,10 +45,37 @@ program
     orchestrator.on('handoff', (seq) => console.error(`\n⚡ batonpass: handoff #${seq} complete, resuming with a fresh session…\n`));
     orchestrator.on('fallback', (reason) => console.error(`\n⚠️  batonpass: ${reason}\n`));
 
-    process.on('SIGINT', () => orchestrator.requestStop());
-    process.on('SIGTERM', () => orchestrator.requestStop());
+    // Bridge the user's terminal to the wrapped agent CLI: forward child PTY
+    // output to our stdout, and the user's keystrokes to the child (the
+    // orchestrator gates the latter, queueing input while it's injecting a
+    // handoff prompt so the two input streams never interleave).
+    const stdin = process.stdin;
+    const isTTY = Boolean(stdin.isTTY && process.stdout.isTTY);
+    orchestrator.on('data', (data) => process.stdout.write(data));
+    const onStdin = (data: Buffer) => orchestrator.feedUserInput(data.toString('utf8'));
+    const onResize = () => orchestrator.resize(process.stdout.columns ?? 120, process.stdout.rows ?? 30);
+    const restoreStdin = () => {
+      stdin.off('data', onStdin);
+      process.stdout.off('resize', onResize);
+      if (isTTY && stdin.isTTY) stdin.setRawMode(false);
+      stdin.pause();
+    };
+    if (isTTY) {
+      stdin.setRawMode(true);
+      stdin.resume();
+      stdin.on('data', onStdin);
+      process.stdout.on('resize', onResize);
+    }
 
-    await orchestrator.run();
+    const stop = () => orchestrator.requestStop();
+    process.on('SIGINT', stop);
+    process.on('SIGTERM', stop);
+
+    try {
+      await orchestrator.run();
+    } finally {
+      restoreStdin();
+    }
   });
 
 program

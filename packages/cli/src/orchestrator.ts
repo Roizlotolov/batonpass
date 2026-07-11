@@ -43,6 +43,8 @@ const HANDOFF_WRITTEN_SENTINEL = 'HANDOFF_WRITTEN';
 export declare interface Orchestrator {
   on(event: 'state', cb: (state: OrchestratorState) => void): this;
   on(event: 'spawn', cb: (pid: number) => void): this;
+  /** Raw child PTY output, for the CLI to forward to the user's terminal. */
+  on(event: 'data', cb: (data: string) => void): this;
   on(event: 'handoff', cb: (seq: number) => void): this;
   on(event: 'fallback', cb: (reason: string) => void): this;
   on(event: 'error', cb: (err: Error) => void): this;
@@ -109,6 +111,11 @@ export class Orchestrator extends EventEmitter {
     } else {
       this.inputQueue.push(data);
     }
+  }
+
+  /** Forward a terminal resize to the current child PTY, if any. */
+  resize(cols: number, rows: number): void {
+    this.child?.resize(cols, rows);
   }
 
   private flushQueuedInput(): void {
@@ -208,6 +215,7 @@ export class Orchestrator extends EventEmitter {
       this.ring.append(data);
       this.hasOutput = true;
       this.lastDataAtMs = this.now();
+      this.emit('data', data);
     });
     this.emit('spawn', child.pid);
   }
