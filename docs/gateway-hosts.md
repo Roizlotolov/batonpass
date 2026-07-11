@@ -186,6 +186,7 @@ plugin upstream (`scheduleSessionTurn` makes it trivial).
    strategy), one Python helper plugin, and a config edit for compaction.
    Python core port is NOT needed (the helper plugin only writes marker
    files; validation stays in the Node CLI).
+   **Implementation plan: [PLAN-hermes.md](../PLAN-hermes.md).**
 2. **OpenClaw plugin** — new embedded orchestration mode; ship semi-auto v1
    per above; file the two UNRESOLVED questions upstream (cron gating,
    compaction-provider gating) and as issues on this repo.

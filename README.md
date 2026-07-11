@@ -221,7 +221,11 @@ tracked honestly in [docs/testing.md](docs/testing.md).
   write a new one.
 - [docs/testing.md](docs/testing.md) — what's automated vs. what still needs
   manual verification against real `claude`/`codex` CLIs before a release.
+- [docs/gateway-hosts.md](docs/gateway-hosts.md) — verified feasibility
+  spike for Hermes Agent & OpenClaw adapters.
 - [PLAN.md](PLAN.md) — full implementation plan + running progress log.
+- [PLAN-hermes.md](PLAN-hermes.md) — implementation plan for the Hermes
+  Agent adapter (next up).
 
 ## Development
 
