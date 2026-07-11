@@ -1,0 +1,50 @@
+name: Bug report
+description: Something in Batonpass isn't working as documented
+labels: ["bug"]
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which area?
+      options:
+        - Orchestrator (`batonpass run`)
+        - Claude Code adapter / hooks
+        - Codex adapter / hooks
+        - Install/uninstall (`batonpass init`)
+        - Handoff format / validation
+        - Not sure / other
+    validations:
+      required: true
+  - type: input
+    id: agent-version
+    attributes:
+      label: Agent CLI + version
+      description: "e.g. `claude --version` or `codex --version` — hook surfaces change between releases, so this is almost always needed"
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: OS and Node version
+      description: "e.g. macOS 15 / Node 22"
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What you expected vs. what actually happened
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant output or state
+      description: "`batonpass doctor` / `batonpass status` output, orchestrator logs, or the contents of `.batonpass/state.json` (redact anything sensitive)"
+      render: shell

@@ -1,0 +1,23 @@
+name: Feature request
+description: Suggest a new adapter, command, or config option
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: What are you trying to do that Batonpass doesn't support today? (New agent-CLI adapters are especially welcome — see docs/adapters.md.)
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+    validations:
+      required: false
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+    validations:
+      required: false

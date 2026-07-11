@@ -1,34 +1,105 @@
+<div align="center">
+
 # batonpass
 
-**Automatic session handoff for coding agents.** Long agent sessions degrade: context
-fills up, built-in auto-compaction is lossy and tool-specific, and people end up
-manually writing "handoff notes" and restarting sessions by hand. Batonpass automates
-the whole loop for [Claude Code](https://code.claude.com) and [Codex CLI](https://developers.openai.com/codex):
+**Automatic session handoff for coding agents — never hit a context limit again.**
+Watches a running agent session, has the agent write its own handoff before context runs out, then respawns a fresh session that picks up exactly where the old one left off.
 
-1. Watches context usage of a running agent session.
-2. At a threshold (default 75%), has **the agent itself** write a structured
-   handoff document — agent-written beats external summarization, since the
-   agent knows what actually matters.
-3. Kills the old session and spawns a fresh one with the handoff injected as
-   initial context.
-4. Repeats indefinitely — chained handoffs, zero manual intervention.
+[![CI](https://github.com/Roizlotolov/batonpass/actions/workflows/ci.yml/badge.svg)](https://github.com/Roizlotolov/batonpass/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Node](https://img.shields.io/badge/node-%E2%89%A520-339933?logo=node.js&logoColor=white)](package.json)
+[![pnpm](https://img.shields.io/badge/pnpm-11-F69220?logo=pnpm&logoColor=white)](pnpm-workspace.yaml)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
-Unlike built-in compaction, Batonpass produces a lossless, structured, cross-tool
-handoff format with a full history on disk (`.batonpass/handoffs/`), and works the
-same way whether you're driving Claude Code or Codex.
+for [Claude Code](https://code.claude.com) · [Codex CLI](https://developers.openai.com/codex)
+
+</div>
+
+## The problem
+
+Long agent sessions degrade. As the context window fills:
+
+1. **Built-in auto-compaction is lossy** — the tool summarizes your session
+   with an external pass that doesn't know which details are load-bearing,
+   and the agent silently starts "forgetting" decisions it already made.
+2. **The manual workaround doesn't scale** — people end up asking the agent
+   to "write handoff notes," restarting the CLI by hand, and pasting the
+   notes back in. Every few hours. Forever.
+
+Batonpass automates that whole loop, and does it better than compaction can:
+**the agent itself writes the handoff** — it knows what actually matters —
+into a structured, validated, on-disk format that works identically across
+tools.
+
+## How it works
+
+```
+watch usage ──► threshold hit ──► wait for turn-idle ──► inject handoff prompt
+     ▲                                                          │
+     │                                                          ▼
+respawn fresh session ◄── kill old session ◄── validate handoff artifact
+     │
+     └── SessionStart hook injects the handoff as initial context … repeat forever
+```
+
+1. `batonpass run claude` (or `codex`) spawns the agent CLI inside a PTY and
+   proxies your keystrokes — you use the agent exactly as before.
+2. Batonpass watches context usage (statusline data for Claude Code, rollout
+   JSONL for Codex).
+3. At a threshold (default **75%**), once the current turn is idle, it
+   injects a prompt asking the agent to write a structured handoff document.
+4. The artifact is validated against the [spec](docs/spec.md). Only after a
+   **valid handoff exists on disk** does Batonpass kill the session and spawn
+   a fresh one, with the handoff injected as initial context via a
+   `SessionStart`-equivalent hook.
+5. Repeat indefinitely — chained handoffs, zero manual intervention, full
+   history in `.batonpass/handoffs/`.
+
+**Safety first:** Batonpass never kills a session without a validated
+artifact already on disk. If the agent writes an invalid handoff it retries
+once with a corrective prompt; if that still fails, it leaves the session
+running and prints instructions instead of destroying in-flight work. On
+Claude Code it also blocks the built-in auto-compaction (via `PreCompact`)
+while the orchestrator is running, so the two mechanisms never fight.
+
+## What a handoff looks like
+
+Every handoff is a directory under `.batonpass/handoffs/` containing a
+machine-readable `handoff.json` (seq, tool, session ID, git HEAD, context %
+at handoff, link to the previous handoff in the chain) and an agent-written
+`handoff.md` with eight required sections:
+
+```md
+# Handoff 3
+
+## Objective            ← the overall task; survives the whole chain verbatim
+## Current state        ← DONE vs. in-progress, concretely
+## Next steps           ← ordered; item 1 is the exact next action with file paths
+## Key decisions        ← decisions + WHY, so the next session doesn't relitigate
+## Files touched        ← path -> one-line description
+## Gotchas & constraints
+## Verification         ← exact commands to confirm current state
+## Do NOT               ← explicit anti-instructions for the next session
+```
+
+A handoff is only valid if every section is present and non-empty. The format
+is [specified](docs/spec.md) and versioned independently of the CLI so other
+tools can read/write it without depending on this repo.
 
 ## Status
 
-Early development (v0.1, unreleased). Package names: `batonpass` (the
-published CLI, binary name `batonpass`) and the `@batonpass/*` scope for the
-internal packages. See [PLAN.md](./PLAN.md) for the full implementation plan
-and a running progress log, and [docs/testing.md](./docs/testing.md) for what
-has and hasn't been verified against real agent CLIs yet.
+Early development (v0.1). **Not yet published to npm** — this repo has not
+been through a real release. The orchestrator is proven end-to-end in CI
+against a deterministic fake agent (3 fully automatic chained handoffs,
+spawn→watch→inject→validate→kill→respawn), but has **not yet been manually
+verified against the real `claude`/`codex` binaries** — see
+[docs/testing.md](docs/testing.md) for the exact remaining checklist before
+you should rely on it. [PLAN.md](PLAN.md) has the full implementation plan
+and a running progress log.
 
-**Not yet published to npm** — this repo has not been through a real release;
-see "Release status" below before relying on it for anything important.
+## Quick start
 
-## Quickstart (once published)
+Once published to npm:
 
 ```sh
 npm i -g batonpass
@@ -36,35 +107,24 @@ batonpass init            # installs hooks + statusline for Claude Code in this 
 batonpass run claude       # spawns `claude` under Batonpass's orchestrator
 ```
 
+From source, today:
+
+```sh
+git clone https://github.com/Roizlotolov/batonpass.git
+cd batonpass
+pnpm install && pnpm build
+node packages/cli/dist/index.js init
+node packages/cli/dist/index.js run claude
+```
+
 Use `--agent codex` for Codex CLI instead, or `--agent all` to set up both.
 Use `--user` instead of the default project scope to install once for every
 project on your machine.
 
-## How it works
-
-```
-┌─────────────────────────────────────────────────────────┐
-│ batonpass CLI (wrapper, node-pty)                            │
-│  • spawns agent CLI in a PTY, proxies stdin/stdout        │
-│  • watches context usage (statusline file / rollout JSONL)│
-│  • at threshold + turn-idle: injects the handoff prompt   │
-│  • waits for a validated artifact → kills → respawns      │
-└───────────────┬─────────────────────────────────────────┘
-                │ reads/writes
-        ┌───────▼────────┐        ┌──────────────────────┐
-        │ .batonpass/ state  │◄───────┤ hooks (per adapter)   │
-        │  state.json    │        │  SessionStart: inject │
-        │  handoffs/*.md │        │  Stop: idle signal     │
-        │  usage.json    │        │  (Claude: PreCompact   │
-        └────────────────┘        │   also blocks auto-    │
-                                   │   compaction)          │
-                                   └──────────────────────┘
-```
-
-Batonpass never kills a session without a validated handoff artifact already on
-disk. If the agent writes an invalid handoff, Batonpass retries once with a
-corrective prompt; if that still fails, it falls back to leaving the session
-running and prints instructions instead of destroying in-flight work.
+> `node-pty` has a native addon — if `pnpm install` fails you're missing a
+> C++ toolchain (Xcode command line tools on macOS, `build-essential` on
+> Linux). Windows: the Claude Code path is untested and the Codex adapter
+> refuses to install (Codex hooks require a POSIX shell).
 
 ## Commands
 
@@ -76,39 +136,102 @@ running and prints instructions instead of destroying in-flight work.
 | `batonpass handoffs [show <seq>]` | List handoffs, or print one. |
 | `batonpass doctor` | Check agent binaries, hook installation, and known platform caveats. |
 
-## Packages (monorepo)
+You can also trigger a handoff manually at any time with `/handoff` inside
+the agent session — useful for a clean end-of-day checkpoint even when
+context isn't full.
 
-- `packages/core` (`@batonpass/core`) — handoff schema/validation, `.batonpass/`
-  state management, prompt templates, usage parsers for both tools.
-- `packages/adapter-claude-code` (`@batonpass/adapter-claude-code`) —
-  Claude Code plugin + hook scripts + install logic.
-- `packages/adapter-codex` (`@batonpass/adapter-codex`) — Codex hooks +
-  install logic.
-- `packages/cli` (`batonpass`, bin `batonpass`) — the orchestrator + CLI.
-- `examples/fake-agent` — a deterministic stand-in CLI used for e2e-testing
-  the orchestrator without a real agent installed.
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ batonpass CLI (packages/cli — node-pty wrapper)              │
+│  • spawns agent CLI in a PTY, proxies stdin/stdout           │
+│  • watches context usage (statusline file / rollout JSONL)   │
+│  • at threshold + turn-idle: injects the handoff prompt      │
+│  • waits for a validated artifact → kills → respawns         │
+└───────────────┬─────────────────────────────────────────────┘
+                │ reads/writes
+        ┌───────▼────────┐        ┌───────────────────────────┐
+        │ .batonpass/    │◄───────┤ hooks (per adapter)        │
+        │  state.json    │        │  SessionStart: inject      │
+        │  handoffs/*.md │        │  Stop: turn-idle signal    │
+        │  usage.json    │        │  PreCompact (Claude only): │
+        └────────────────┘        │  blocks auto-compaction    │
+                                  └───────────────────────────┘
+```
+
+The orchestrator knows nothing about any specific agent CLI — it only calls
+methods on an `Adapter` interface. Adding support for a new tool (OpenClaw,
+Hermes, OpenCode, …) means writing one adapter package — see
+[docs/adapters.md](docs/adapters.md); contributions welcome.
+
+### Packages (monorepo)
+
+```
+packages/
+├── core/                  @batonpass/core — handoff schema/validation, .batonpass/ state,
+│                          prompt templates, usage parsers for both tools
+├── adapter-claude-code/   @batonpass/adapter-claude-code — Claude Code hooks + statusline + install
+├── adapter-codex/         @batonpass/adapter-codex — Codex CLI hooks + config.toml install
+└── cli/                   batonpass (bin: batonpass) — the orchestrator + commander CLI
+examples/
+└── fake-agent/            deterministic stand-in CLI for e2e-testing without a real agent
+```
+
+## Verification methodology
+
+Both Claude Code's and Codex CLI's hook systems are explicitly marked
+experimental upstream and change between versions, so every adapter fact in
+this repo (hook names, stdin payload shapes, config file mechanics) was
+verified against the tools' **current live documentation** during
+implementation — not cached model knowledge — and the re-verification log
+lives in [PLAN.md](PLAN.md). The test suite follows the same philosophy:
+
+- Every hook script is tested by invoking it as a **real child process** with
+  recorded stdin fixtures — not by unit-testing helpers in isolation.
+- The full orchestrator lifecycle is proven end-to-end through a **real
+  `node-pty`** against a deterministic fake agent: 3 chained automatic
+  handoffs, lock-file exclusivity between two orchestrators, path-traversal
+  rejection on tampered state, and a 5-cycle drift test proving the
+  Objective section survives write→read→re-render verbatim.
+
+What's automated vs. what still needs a human with real CLIs installed is
+tracked honestly in [docs/testing.md](docs/testing.md).
 
 ## Docs
 
-- [docs/spec.md](./docs/spec.md) — the handoff artifact format (versioned
-  separately from the CLI; this is the part other tools should be able to
-  adopt).
-- [docs/adapters.md](./docs/adapters.md) — how to write a new adapter (e.g.
-  for OpenClaw, Hermes, OpenCode — contributions welcome).
-- [docs/testing.md](./docs/testing.md) — what's automated vs. what still
-  needs manual verification against real `claude`/`codex` CLIs before a
-  release.
-- [CONTRIBUTING.md](./CONTRIBUTING.md) — dev setup, changesets workflow.
+- [docs/spec.md](docs/spec.md) — the handoff artifact format (versioned
+  separately from the CLI; this is the part other tools should adopt).
+- [docs/adapters.md](docs/adapters.md) — the `Adapter` interface and how to
+  write a new one.
+- [docs/testing.md](docs/testing.md) — what's automated vs. what still needs
+  manual verification against real `claude`/`codex` CLIs before a release.
+- [PLAN.md](PLAN.md) — full implementation plan + running progress log.
 
 ## Development
 
 ```sh
 pnpm install
 pnpm build
-pnpm test
+pnpm test    # vitest: unit + hook-script integration + PTY e2e (no real agent, API key, or network needed)
 pnpm lint
 ```
 
+Node 20 or 22. CI runs the full matrix (ubuntu/macos × node 20/22) on every
+push and PR — see [.github/workflows/ci.yml](.github/workflows/ci.yml).
+Releases are driven by [changesets](https://github.com/changesets/changesets):
+merging the auto-generated "Version Packages" PR publishes to npm.
+
+## Contributing
+
+Issues and PRs welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for the
+ground rules (the short version: verify adapter facts against the real CLI's
+current docs, test hook scripts as real child processes, and add a
+changeset). New adapters are the most valuable contribution — see
+[docs/adapters.md](docs/adapters.md). This project follows the
+[Contributor Covenant](CODE_OF_CONDUCT.md). Security issues: see
+[SECURITY.md](SECURITY.md).
+
 ## License
 
-MIT
+[MIT](LICENSE)

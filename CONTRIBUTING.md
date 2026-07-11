@@ -48,6 +48,12 @@ C++ toolchain (Xcode command line tools on macOS, `build-essential` on Linux).
   `.github/workflows/release.yml`). Regular feature/fix PRs should never
   need to bump versions or edit CHANGELOGs by hand.
 
+## Code of conduct & security
+
+This project follows the [Contributor Covenant](./CODE_OF_CONDUCT.md).
+Please don't open a public issue for a security concern — see
+[SECURITY.md](./SECURITY.md) for private reporting.
+
 ## Reporting hook/CLI drift
 
 Both Claude Code and Codex CLI hook systems are explicitly marked
