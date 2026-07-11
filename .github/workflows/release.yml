@@ -20,7 +20,14 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
       - run: pnpm test
+      # Publishing stays dormant until an NPM_TOKEN secret exists — the
+      # packages haven't had their first real release yet (see README
+      # "Status" / docs/testing.md for the pre-release checklist).
+      - name: Check for NPM_TOKEN
+        id: npm-token
+        run: echo "present=${{ secrets.NPM_TOKEN != '' }}" >> "$GITHUB_OUTPUT"
       - uses: changesets/action@v1
+        if: steps.npm-token.outputs.present == 'true'
         with:
           publish: pnpm release
         env:
