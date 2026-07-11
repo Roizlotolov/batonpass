@@ -11,6 +11,7 @@ import {
 } from '@batonpass/core';
 import { batonpassScriptsInstallDir, projectSettingsPath, transcriptDirForCwd, userSettingsPath } from './paths.js';
 import {
+  BATON_PERMISSION_RULES,
   backupSettings,
   isBatonpassInstalled,
   mergeBatonpassSettings,
@@ -99,6 +100,16 @@ export class ClaudeCodeAdapter implements Adapter {
     }
     if (cleaned.statusLine?.command.includes('statusline.mjs')) {
       delete cleaned.statusLine;
+    }
+    // Remove only the permission rules we added; leave the user's own rules and
+    // an empty allow[]/permissions{} tidied up.
+    if (cleaned.permissions?.allow) {
+      const remaining = cleaned.permissions.allow.filter((r) => !BATON_PERMISSION_RULES.includes(r));
+      const permissions = { ...cleaned.permissions };
+      if (remaining.length > 0) permissions.allow = remaining;
+      else delete permissions.allow;
+      if (Object.keys(permissions).length > 0) cleaned.permissions = permissions;
+      else delete cleaned.permissions;
     }
     await backupSettings(settingsPath);
     await writeSettingsAtomic(settingsPath, cleaned);

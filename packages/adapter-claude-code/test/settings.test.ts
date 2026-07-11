@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
+  BATON_PERMISSION_RULES,
   backupSettings,
   isBatonpassInstalled,
   mergeBatonpassSettings,
@@ -34,6 +35,22 @@ describe('mergeBatonpassSettings', () => {
     const once = mergeBatonpassSettings({}, '/scripts').settings;
     const twice = mergeBatonpassSettings(once, '/scripts').settings;
     expect(twice.hooks?.SessionStart).toHaveLength(1);
+  });
+
+  it('pre-authorizes .batonpass writes without clobbering existing permission rules', () => {
+    const existing = { permissions: { allow: ['Bash(git:*)'] } };
+    const { settings } = mergeBatonpassSettings(existing, '/scripts');
+    expect(settings.permissions?.allow).toContain('Bash(git:*)');
+    for (const rule of BATON_PERMISSION_RULES) {
+      expect(settings.permissions?.allow).toContain(rule);
+    }
+  });
+
+  it('does not duplicate permission rules when merged twice', () => {
+    const once = mergeBatonpassSettings({}, '/scripts').settings;
+    const twice = mergeBatonpassSettings(once, '/scripts').settings;
+    const writeRules = twice.permissions?.allow?.filter((r) => r === BATON_PERMISSION_RULES[0]) ?? [];
+    expect(writeRules).toHaveLength(1);
   });
 
   it('chains a pre-existing statusline command via BATON_CHAIN_STATUSLINE_COMMAND', () => {

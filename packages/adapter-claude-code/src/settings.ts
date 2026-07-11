@@ -10,11 +10,18 @@ export interface HookEntry {
 export interface ClaudeSettings {
   hooks?: Partial<Record<HookEvent, HookEntry[]>>;
   statusLine?: { type: 'command'; command: string };
+  permissions?: { allow?: string[]; deny?: string[]; ask?: string[]; [key: string]: unknown };
   [key: string]: unknown;
 }
 
 const BATON_HOOK_SCRIPT_NAMES = ['session-start.mjs', 'pre-compact.mjs', 'stop.mjs', 'session-end.mjs'];
 const BATON_STATUSLINE_SCRIPT_NAME = 'statusline.mjs';
+
+// Pre-authorize the agent to write its handoff artifact without an interactive
+// approval prompt — batonpass's whole point is unattended handoffs, and a Write
+// prompt at the threshold would stall the automatic cycle. Scoped to `.batonpass/`
+// only. (Verified against real Claude Code: this rule suppresses the write prompt.)
+export const BATON_PERMISSION_RULES = ['Write(.batonpass/**)', 'Edit(.batonpass/**)'];
 
 function commandIsBatonpass(command: string, scriptNames: string[]): boolean {
   return scriptNames.some((name) => command.includes(name));
@@ -83,6 +90,15 @@ export function mergeBatonpassSettings(
     ? `BATON_CHAIN_STATUSLINE_COMMAND=${JSON.stringify(previousStatusLineCommand)} `
     : '';
   settings.statusLine = { type: 'command', command: `${chainPrefix}node "${statuslineScript}"` };
+
+  // Pre-authorize handoff-artifact writes (idempotent, preserves any existing rules).
+  const permissions = { ...settings.permissions };
+  const allow = [...(permissions.allow ?? [])];
+  for (const rule of BATON_PERMISSION_RULES) {
+    if (!allow.includes(rule)) allow.push(rule);
+  }
+  permissions.allow = allow;
+  settings.permissions = permissions;
 
   return { settings, previousStatusLineCommand };
 }
