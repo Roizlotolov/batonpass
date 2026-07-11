@@ -4,7 +4,9 @@ import path from 'node:path';
 import {
   ArtifactValidationError,
   correctivePrompt,
+  isSafeHandoffDirName,
   readHandoff,
+  resumePromptPtyType,
   type Adapter,
   type Config,
 } from '@batonpass/core';
@@ -17,6 +19,7 @@ export type OrchestratorState =
   | 'SPAWN'
   | 'MONITOR'
   | 'AWAIT_TURN_IDLE'
+  | 'INJECT_RESUME'
   | 'INJECT_HANDOFF_PROMPT'
   | 'AWAIT_ARTIFACT'
   | 'VALIDATE_ARTIFACT'
@@ -72,6 +75,8 @@ export class Orchestrator extends EventEmitter {
   private sessionSinceMs = 0;
   private handoffCount = 0;
   private runPromise: Promise<void> | null = null;
+  private hasOutput = false;
+  private lastDataAtMs = 0;
 
   constructor(opts: OrchestratorOptions) {
     super();
@@ -152,6 +157,7 @@ export class Orchestrator extends EventEmitter {
       if (this.handoffCount >= this.config.maxChainedHandoffs) break;
 
       await this.spawnChild();
+      await this.maybeInjectPtyTypeResume();
       const outcome = await this.monitorUntilThresholdOrExit();
 
       if (outcome === 'exited') {
@@ -193,11 +199,57 @@ export class Orchestrator extends EventEmitter {
     this.child = child;
     this.ring.clear();
     this.sessionSinceMs = this.now();
+    this.hasOutput = false;
+    this.lastDataAtMs = this.now();
     this.forwardingInput = true;
     this.flushQueuedInput();
 
-    child.onData((data) => this.ring.append(data));
+    child.onData((data) => {
+      this.ring.append(data);
+      this.hasOutput = true;
+      this.lastDataAtMs = this.now();
+    });
     this.emit('spawn', child.pid);
+  }
+
+  /**
+   * For adapters with no context-injection hook (`resumeInjection() === 'pty-type'`),
+   * types the resume instruction directly into the freshly spawned PTY once a pending
+   * handoff exists and the CLI has produced output then gone quiet (mirrors what a
+   * SessionStart hook does for the other adapters, including clearing `pendingHandoff`
+   * the same way). No-op for `'session-start-hook'` adapters and when nothing is pending.
+   */
+  private async maybeInjectPtyTypeResume(): Promise<void> {
+    if (this.adapter.resumeInjection() !== 'pty-type') return;
+
+    const state = await readState(this.paths);
+    if (!state.pendingHandoff || !isSafeHandoffDirName(state.pendingHandoff)) return;
+    const pendingHandoff = state.pendingHandoff;
+
+    this.setState('INJECT_RESUME');
+    await this.waitForPtyQuiet();
+    if (this.stopRequested) return;
+    await this.sleep(this.config.resumeTypeDelayMs);
+    if (this.stopRequested || !this.child) return;
+
+    const relPath = path.join('.batonpass', 'handoffs', pendingHandoff, 'handoff.md');
+    this.child.write(resumePromptPtyType(relPath));
+    this.child.write('\r');
+
+    // Only clear if it's still the same pending handoff — a concurrent change (there
+    // shouldn't be one, single orchestrator owns this state) is left alone rather than clobbered.
+    await updateState(this.paths, (s) => (s.pendingHandoff === pendingHandoff ? { ...s, pendingHandoff: null } : s));
+  }
+
+  /** Wait until the child has produced output and then gone quiet for `idleQuietMs` (readiness heuristic for typing). */
+  private async waitForPtyQuiet(): Promise<void> {
+    const deadline = this.now() + this.config.handoffTimeoutMs;
+    for (;;) {
+      if (this.stopRequested) return;
+      if (this.hasOutput && this.now() - this.lastDataAtMs >= this.config.idleQuietMs) return;
+      if (this.now() >= deadline) return; // safety valve — proceed anyway rather than hang forever
+      await this.sleep(Math.min(this.config.pollIntervalMs, this.config.idleQuietMs, 100));
+    }
   }
 
   /** Poll usage until threshold is hit, the child exits on its own, or a stop is requested. */

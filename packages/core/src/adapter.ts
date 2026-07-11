@@ -39,8 +39,14 @@ export interface Adapter {
   isTurnIdle(session: SessionRef): Promise<boolean>;
   /** Type the handoff-writing prompt into the PTY as if the user had, plus a trailing newline. */
   injectHandoffPrompt(pty: PtyLike, artifactPath: string): Promise<void>;
-  /** How resumed sessions receive the handoff — both v1 adapters use their SessionStart-equivalent hook. */
-  resumeInjection(): 'session-start-hook';
+  /**
+   * How resumed sessions receive the handoff. `'session-start-hook'`: the adapter's
+   * SessionStart-equivalent hook injects it (orchestrator does nothing extra).
+   * `'pty-type'`: the CLI has no context-injection hook, so the orchestrator itself
+   * types a single-line resume instruction into the fresh session's PTY once it's
+   * ready (see `resumePromptPtyType` in prompts.ts and the Hermes adapter).
+   */
+  resumeInjection(): 'session-start-hook' | 'pty-type';
   /** Shell-safe key sequence to gracefully end the child CLI (e.g. `/exit\r` or Ctrl-D). */
   gracefulExitKeys(): string;
 }

@@ -1,10 +1,12 @@
 import { ClaudeCodeAdapter } from '@batonpass/adapter-claude-code';
 import { CodexAdapter } from '@batonpass/adapter-codex';
+import { HermesAdapter } from '@batonpass/adapter-hermes';
 import type { Adapter, ToolId } from '@batonpass/core';
 
 const registry: Record<ToolId, () => Adapter> = {
   'claude-code': () => new ClaudeCodeAdapter(),
   codex: () => new CodexAdapter(),
+  hermes: () => new HermesAdapter(),
 };
 
 export function getAdapter(tool: ToolId): Adapter {
@@ -13,4 +15,4 @@ export function getAdapter(tool: ToolId): Adapter {
   return factory();
 }
 
-export const SUPPORTED_TOOLS: ToolId[] = ['claude-code', 'codex'];
+export const SUPPORTED_TOOLS: ToolId[] = ['claude-code', 'codex', 'hermes'];

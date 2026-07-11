@@ -4,12 +4,17 @@
 // Claude Code / Codex installation.
 //
 // Behavior:
-//  - On startup, checks .batonpass/state.json for pendingHandoff; if present,
-//    prints "RESUMED:<dirname>" (simulating SessionStart-hook injection) and
-//    clears it (mirrors what a real adapter's SessionStart hook does).
+//  - On startup, unless FAKE_AGENT_SESSION_START_HOOK=0, checks .batonpass/state.json
+//    for pendingHandoff; if present, prints "RESUMED:<dirname>" (simulating
+//    SessionStart-hook injection) and clears it (mirrors what a real adapter's
+//    SessionStart hook does). Set FAKE_AGENT_SESSION_START_HOOK=0 to simulate a CLI
+//    with no context-injection hook (e.g. Hermes) — the orchestrator itself must
+//    then type the resume line via the PTY ('pty-type' resumeInjection strategy).
 //  - Every ~150ms it simulates a turn of ambient work: usage climbs by a fixed
 //    step, written to .batonpass/fake-usage.json, and a .batonpass/turn-idle marker
 //    is refreshed (simulates a Stop hook firing at the end of every turn).
+//  - Every received stdin line is appended to .batonpass/received-lines.log, so
+//    tests can assert on content typed into the PTY (e.g. a 'pty-type' resume line).
 //  - When it receives a line of stdin input containing the phrase
 //    "write a handoff document to exactly this path:", it parses the target
 //    path out of that line, writes a valid handoff.md + handoff.json there,
@@ -25,9 +30,11 @@ const batonpassDir = path.join(cwd, '.batonpass');
 const usagePath = path.join(batonpassDir, 'fake-usage.json');
 const turnIdlePath = path.join(batonpassDir, 'turn-idle');
 const statePath = path.join(batonpassDir, 'state.json');
+const receivedLinesPath = path.join(batonpassDir, 'received-lines.log');
 
 const USAGE_STEP = Number(process.env.FAKE_AGENT_USAGE_STEP ?? '0.12');
 const TICK_MS = Number(process.env.FAKE_AGENT_TICK_MS ?? '150');
+const SESSION_START_HOOK_ENABLED = process.env.FAKE_AGENT_SESSION_START_HOOK !== '0';
 const MAX_TOKENS = 200_000;
 
 let pct = 0;
@@ -51,6 +58,7 @@ async function writeUsage() {
 }
 
 async function checkResume() {
+  if (!SESSION_START_HOOK_ENABLED) return;
   let state;
   try {
     state = JSON.parse(await fs.readFile(statePath, 'utf8'));
@@ -133,6 +141,11 @@ async function writeHandoffArtifact(mdPath) {
 }
 
 async function main() {
+  await fs.mkdir(batonpassDir, { recursive: true });
+  // Real interactive CLIs print a startup banner/prompt before going quiet and waiting
+  // for input — fake-agent mimics that so 'pty-type' resume-readiness tests (which wait
+  // for output-then-quiet, not just a fallback timeout) exercise the real heuristic.
+  console.log('[fake-agent] ready');
   await checkResume();
   await writeUsage();
 
@@ -144,6 +157,7 @@ async function main() {
 
   const rl = readline.createInterface({ input: process.stdin, terminal: false });
   rl.on('line', async (line) => {
+    await fs.appendFile(receivedLinesPath, `${line}\n`, 'utf8');
     if (line.trim() === '/exit') {
       clearInterval(ticker);
       process.exit(0);

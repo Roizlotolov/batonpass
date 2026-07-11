@@ -1,0 +1,31 @@
+#!/usr/bin/env node
+// A minimal stand-in for the real `hermes` binary, used only by adapter.test.ts
+// to exercise HermesAdapter's shell-outs (`--version`, `plugins enable`,
+// `plugins disable`) without depending on a real Hermes install. Every
+// invocation is appended to $FAKE_HERMES_LOG (if set) so tests can assert on
+// exactly what was run. Set FAKE_HERMES_ENABLE_EXIT_CODE to force a non-zero
+// exit from `plugins enable`, simulating a failure.
+import { appendFileSync } from 'node:fs';
+
+const args = process.argv.slice(2);
+if (process.env.FAKE_HERMES_LOG) {
+  appendFileSync(process.env.FAKE_HERMES_LOG, `${args.join(' ')}\n`, 'utf8');
+}
+
+if (args[0] === '--version') {
+  console.log('hermes 0.0.0-fake');
+  process.exit(0);
+}
+
+if (args[0] === 'plugins' && args[1] === 'enable') {
+  const code = Number(process.env.FAKE_HERMES_ENABLE_EXIT_CODE ?? '0');
+  if (code !== 0) console.error('fake hermes: forced enable failure');
+  process.exit(code);
+}
+
+if (args[0] === 'plugins' && args[1] === 'disable') {
+  process.exit(0);
+}
+
+console.error(`fake hermes: unhandled args: ${args.join(' ')}`);
+process.exit(1);

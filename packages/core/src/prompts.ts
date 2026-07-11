@@ -50,6 +50,17 @@ export function resumePrompt(handoffMdContent: string, handoffsDirDisplayPath = 
   ].join('\n');
 }
 
+/**
+ * Single-line resume instruction typed directly into a fresh session's PTY by the
+ * orchestrator, for adapters whose CLI has no context-injection hook (`resumeInjection()
+ * === 'pty-type'`). Deliberately one line — typing multi-line content into a PTY can
+ * submit prematurely on the first newline. The artifact stays on disk; the agent reads
+ * it with its own file tools.
+ */
+export function resumePromptPtyType(handoffRelPath: string): string {
+  return `Resuming from a previous session. Read ${handoffRelPath} in full before doing anything else and continue from its Next steps; honor its Do NOT section.`;
+}
+
 /** Corrective prompt used for the single retry when a written artifact fails validation. */
 export function correctivePrompt(artifactPath: string, issues: string[]): string {
   return [

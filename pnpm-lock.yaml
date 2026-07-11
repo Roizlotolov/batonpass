@@ -71,6 +71,22 @@ importers:
         specifier: ^2.1.5
         version: 2.1.9(@types/node@22.20.1)
 
+  packages/adapter-hermes:
+    dependencies:
+      '@batonpass/core':
+        specifier: workspace:*
+        version: link:../core
+    devDependencies:
+      tsup:
+        specifier: ^8.3.5
+        version: 8.5.1(postcss@8.5.16)(typescript@5.9.3)
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.5
+        version: 2.1.9(@types/node@22.20.1)
+
   packages/cli:
     dependencies:
       '@batonpass/adapter-claude-code':
@@ -79,6 +95,9 @@ importers:
       '@batonpass/adapter-codex':
         specifier: workspace:*
         version: link:../adapter-codex
+      '@batonpass/adapter-hermes':
+        specifier: workspace:*
+        version: link:../adapter-hermes
       '@batonpass/core':
         specifier: workspace:*
         version: link:../core

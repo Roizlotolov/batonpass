@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 /** Which coding agent CLI a handoff was produced by / for. */
-export const ToolId = z.enum(['claude-code', 'codex']);
+export const ToolId = z.enum(['claude-code', 'codex', 'hermes']);
 export type ToolId = z.infer<typeof ToolId>;
 
 /** Lifecycle status of a single handoff artifact. */
@@ -68,6 +68,8 @@ export const ConfigSchema = z.object({
   pollIntervalMs: z.number().int().positive().default(5000),
   idleQuietMs: z.number().int().positive().default(3000),
   handoffTimeoutMs: z.number().int().positive().default(5 * 60 * 1000),
+  /** Extra delay applied after the PTY goes quiet, before typing a 'pty-type' resume line (see Adapter.resumeInjection). */
+  resumeTypeDelayMs: z.number().int().nonnegative().default(500),
   maxChainedHandoffs: z.number().int().positive().or(z.literal(Infinity)).default(Infinity),
   agentBinPath: z.record(ToolId, z.string()).default({}),
   modelContextSize: z.record(z.string(), z.number().int().positive()).default({}),

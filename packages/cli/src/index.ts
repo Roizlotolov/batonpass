@@ -1,7 +1,9 @@
 #!/usr/bin/env node
+import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { getCompressionThreshold, hermesConfigYamlPath } from '@batonpass/adapter-hermes';
 import {
   BatonpassPaths,
   defaultUserConfigPath,
@@ -52,27 +54,39 @@ program
 program
   .command('init')
   .description('Install Batonpass hooks/statusline for an agent.')
-  .option('--agent <agent>', 'claude | codex | all', 'claude')
+  .option('--agent <agent>', 'claude | codex | hermes | all', 'claude')
   .option('--project', 'install at project scope (default)', true)
   .option('--user', 'install at user scope')
   .option('--uninstall', 'remove a previous install instead')
   .action(async (opts: { agent: string; project: boolean; user: boolean; uninstall?: boolean }) => {
     const cwd = process.cwd();
     const scope: 'user' | 'project' = opts.user ? 'user' : 'project';
-    const agents = opts.agent === 'all' ? (['claude-code', 'codex'] as ToolId[]) : [opts.agent === 'claude' ? 'claude-code' : (opts.agent as ToolId)];
+    const agents =
+      opts.agent === 'all'
+        ? (['claude-code', 'codex', 'hermes'] as ToolId[])
+        : [opts.agent === 'claude' ? 'claude-code' : (opts.agent as ToolId)];
 
+    let anyFailed = false;
     for (const tool of agents) {
       assertTool(tool);
       const adapter = getAdapter(tool);
-      if (opts.uninstall) {
-        await adapter.uninstall(scope, cwd);
-        console.log(`batonpass: uninstalled ${tool} (${scope} scope).`);
-      } else {
-        const { backedUpFiles } = await adapter.install(scope, cwd);
-        console.log(`batonpass: installed ${tool} (${scope} scope).`);
-        for (const f of backedUpFiles) console.log(`  backed up: ${f}`);
+      try {
+        if (opts.uninstall) {
+          await adapter.uninstall(scope, cwd);
+          console.log(`batonpass: uninstalled ${tool} (${scope} scope).`);
+        } else {
+          const { backedUpFiles } = await adapter.install(scope, cwd);
+          console.log(`batonpass: installed ${tool} (${scope} scope).`);
+          for (const f of backedUpFiles) console.log(`  backed up: ${f}`);
+        }
+      } catch (err) {
+        // One tool's failure (e.g. Hermes rejecting project scope, or Codex/Hermes
+        // refusing Windows) must not stop `--agent all` from finishing the others.
+        anyFailed = true;
+        console.error(`batonpass: ${tool} ${opts.uninstall ? 'uninstall' : 'install'} failed: ${(err as Error).message}`);
       }
     }
+    if (anyFailed) process.exitCode = 1;
   });
 
 program
@@ -123,7 +137,9 @@ program
   .action(async () => {
     const cwd = process.cwd();
     if (process.platform === 'win32') {
-      console.log('⚠️  Windows detected: Codex hooks are disabled on Windows upstream; only the Claude Code adapter is supported here.');
+      console.log(
+        '⚠️  Windows detected: Codex hooks are disabled on Windows upstream, and the Hermes adapter has not been verified there; only the Claude Code adapter is supported here.',
+      );
     }
 
     for (const tool of SUPPORTED_TOOLS) {
@@ -141,6 +157,21 @@ program
           console.log(`  ${scope} hooks configured: ${configured}`);
         } catch (err) {
           console.log(`  ${scope} hooks configured: error (${(err as Error).message})`);
+        }
+      }
+
+      if (tool === 'hermes') {
+        try {
+          const configText = await fs.readFile(hermesConfigYamlPath(), 'utf8').catch(() => '');
+          const hermesThreshold = getCompressionThreshold(configText);
+          const batonpassConfig = await loadConfig(cwd, defaultUserConfigPath(os.homedir()));
+          if (hermesThreshold !== null && hermesThreshold <= batonpassConfig.threshold) {
+            console.log(
+              `  ⚠️  Hermes compression.threshold (${hermesThreshold}) is <= batonpass's own threshold (${batonpassConfig.threshold}) — Hermes may auto-compress before batonpass gets a chance to hand off.`,
+            );
+          }
+        } catch {
+          // best-effort diagnostic only — never block `doctor` on this
         }
       }
     }

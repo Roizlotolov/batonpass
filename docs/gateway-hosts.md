@@ -1,5 +1,12 @@
 # Feasibility: Hermes Agent & OpenClaw adapters
 
+> **Status:** the Hermes Agent adapter analyzed below has since been
+> implemented — see [PLAN-hermes.md](./PLAN-hermes.md) for the
+> implementation plan and its own (re-verified, sometimes corrected) Progress
+> log, and `packages/adapter-hermes/`. This document is left as-is as the
+> original feasibility spike; OpenClaw remains the open candidate for a
+> future adapter.
+
 Verification spike, 2026-07-11. Every claim below was checked against real
 source — `NousResearch/hermes-agent` at commit `c552984` (fresh clone) and
 the `openclaw@2026.6.11` npm package (installed, types + bundled docs +

@@ -11,7 +11,7 @@ Watches a running agent session, has the agent write its own handoff before cont
 [![pnpm](https://img.shields.io/badge/pnpm-11-F69220?logo=pnpm&logoColor=white)](pnpm-workspace.yaml)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
-for [Claude Code](https://code.claude.com) · [Codex CLI](https://developers.openai.com/codex)
+for [Claude Code](https://code.claude.com) · [Codex CLI](https://developers.openai.com/codex) · [Hermes Agent](https://github.com/NousResearch/hermes-agent)
 
 <img src="docs/assets/handoff-comic.svg" alt="Comic — left panel: an exhausted agent session at 99% context slumped over a laptop at 3 AM asking 'wait… what were we building again?'; right panel: it hands a baton labeled handoff.md to a fresh session at 0% context sprinting away" width="840">
 
@@ -50,14 +50,23 @@ node packages/cli/dist/index.js init --agent codex
 node packages/cli/dist/index.js run codex
 ```
 
-Use `--agent all` to set up both, `--user` to install once for every project
-on your machine, `--uninstall` to cleanly remove. Then just work normally —
-at 75% context the agent writes its handoff and a fresh session takes over
-automatically. Trigger one manually anytime with `/handoff` inside the
-session.
+### Hermes Agent
 
-> Windows: the Claude Code path is untested and the Codex adapter refuses to
-> install (Codex hooks require a POSIX shell).
+```sh
+node packages/cli/dist/index.js init --agent hermes --user   # Hermes has no project scope
+node packages/cli/dist/index.js run hermes
+```
+
+Use `--agent all` to set up every tool at once, `--user` to install once for
+every project on your machine (required for Hermes), `--uninstall` to
+cleanly remove. Then just work normally — at 75% context the agent writes
+its handoff and a fresh session takes over automatically. Trigger one
+manually anytime with `/handoff` (Claude Code/Codex) or `/baton` (Hermes —
+`/handoff` is already a built-in Hermes command) inside the session.
+
+> Windows: the Claude Code path is untested, the Codex adapter refuses to
+> install (Codex hooks require a POSIX shell), and the Hermes adapter refuses
+> too (untested there, not a documented upstream restriction like Codex's).
 
 ## The problem
 
@@ -86,16 +95,18 @@ respawn fresh session ◄── kill old session ◄── validate handoff arti
      └── SessionStart hook injects the handoff as initial context … repeat forever
 ```
 
-1. `batonpass run claude` (or `codex`) spawns the agent CLI inside a PTY and
-   proxies your keystrokes — you use the agent exactly as before.
+1. `batonpass run claude` (or `codex`/`hermes`) spawns the agent CLI inside a
+   PTY and proxies your keystrokes — you use the agent exactly as before.
 2. Batonpass watches context usage (statusline data for Claude Code, rollout
-   JSONL for Codex).
+   JSONL for Codex, a small helper plugin's usage.json for Hermes).
 3. At a threshold (default **75%**), once the current turn is idle, it
    injects a prompt asking the agent to write a structured handoff document.
 4. The artifact is validated against the [spec](docs/spec.md). Only after a
    **valid handoff exists on disk** does Batonpass kill the session and spawn
-   a fresh one, with the handoff injected as initial context via a
-   `SessionStart`-equivalent hook.
+   a fresh one, with the handoff delivered to the new session either via a
+   `SessionStart`-equivalent hook (Claude Code, Codex) or, for tools with no
+   context-injection hook at all (Hermes), by the orchestrator typing a
+   single-line resume instruction directly into the fresh session's PTY.
 5. Repeat indefinitely — chained handoffs, zero manual intervention, full
    history in `.batonpass/handoffs/`.
 
@@ -135,25 +146,26 @@ tools can read/write it without depending on this repo.
 Early development (v0.1). **Not yet published to npm** — this repo has not
 been through a real release. The orchestrator is proven end-to-end in CI
 against a deterministic fake agent (3 fully automatic chained handoffs,
-spawn→watch→inject→validate→kill→respawn), but has **not yet been manually
-verified against the real `claude`/`codex` binaries** — see
-[docs/testing.md](docs/testing.md) for the exact remaining checklist before
-you should rely on it. [PLAN.md](PLAN.md) has the full implementation plan
-and a running progress log.
+spawn→watch→inject→validate→kill→respawn, including the Hermes-style typed
+resume path), but has **not yet been manually verified against the real
+`claude`/`codex`/`hermes` binaries** — see [docs/testing.md](docs/testing.md)
+for the exact remaining checklist before you should rely on it. [PLAN.md](PLAN.md)
+and [PLAN-hermes.md](PLAN-hermes.md) have the full implementation plans and
+running progress logs.
 
 ## Commands
 
 | Command | What it does |
 |---|---|
-| `batonpass run <claude\|codex>` | The orchestrator: spawns the agent CLI and manages the full handoff lifecycle. |
-| `batonpass init [--agent claude\|codex\|all] [--project\|--user] [--uninstall]` | Install (or remove) hooks/statusline for an agent. |
+| `batonpass run <claude\|codex\|hermes>` | The orchestrator: spawns the agent CLI and manages the full handoff lifecycle. |
+| `batonpass init [--agent claude\|codex\|hermes\|all] [--project\|--user] [--uninstall]` | Install (or remove) hooks/plugin/config for an agent (Hermes requires `--user`). |
 | `batonpass status` | Current orchestrator/session state for this project. |
 | `batonpass handoffs [show <seq>]` | List handoffs, or print one. |
 | `batonpass doctor` | Check agent binaries, hook installation, and known platform caveats. |
 
-You can also trigger a handoff manually at any time with `/handoff` inside
-the agent session — useful for a clean end-of-day checkpoint even when
-context isn't full.
+You can also trigger a handoff manually at any time with `/handoff` (Claude
+Code/Codex) or `/baton` (Hermes) inside the agent session — useful for a
+clean end-of-day checkpoint even when context isn't full.
 
 ## Architecture
 
@@ -177,7 +189,7 @@ context isn't full.
 
 The orchestrator knows nothing about any specific agent CLI — it only calls
 methods on an `Adapter` interface. Adding support for a new tool (OpenClaw,
-Hermes, OpenCode, …) means writing one adapter package — see
+OpenCode, …) means writing one adapter package — see
 [docs/adapters.md](docs/adapters.md); contributions welcome.
 
 ### Packages (monorepo)
@@ -185,9 +197,10 @@ Hermes, OpenCode, …) means writing one adapter package — see
 ```
 packages/
 ├── core/                  @batonpass/core — handoff schema/validation, .batonpass/ state,
-│                          prompt templates, usage parsers for both tools
+│                          prompt templates, usage parsers for all three tools
 ├── adapter-claude-code/   @batonpass/adapter-claude-code — Claude Code hooks + statusline + install
 ├── adapter-codex/         @batonpass/adapter-codex — Codex CLI hooks + config.toml install
+├── adapter-hermes/        @batonpass/adapter-hermes — Hermes Agent Python plugin + config.yaml install
 └── cli/                   batonpass (bin: batonpass) — the orchestrator + commander CLI
 examples/
 └── fake-agent/            deterministic stand-in CLI for e2e-testing without a real agent
@@ -195,20 +208,24 @@ examples/
 
 ## Verification methodology
 
-Both Claude Code's and Codex CLI's hook systems are explicitly marked
-experimental upstream and change between versions, so every adapter fact in
-this repo (hook names, stdin payload shapes, config file mechanics) was
-verified against the tools' **current live documentation** during
-implementation — not cached model knowledge — and the re-verification log
-lives in [PLAN.md](PLAN.md). The test suite follows the same philosophy:
+Claude Code's and Codex CLI's hook systems are explicitly marked experimental
+upstream and change between versions; Hermes Agent's plugin API is
+undocumented and only knowable by reading its source. So every adapter fact
+in this repo (hook names, stdin payload shapes, config file mechanics) was
+verified against the tools' **current live documentation, or a fresh clone
+of the source for Hermes** — not cached model knowledge — and the
+re-verification logs live in [PLAN.md](PLAN.md) and [PLAN-hermes.md](PLAN-hermes.md).
+The test suite follows the same philosophy:
 
-- Every hook script is tested by invoking it as a **real child process** with
-  recorded stdin fixtures — not by unit-testing helpers in isolation.
+- Every hook script (and Hermes' Python plugin) is tested by invoking it as a
+  **real child process** with recorded stdin fixtures — not by unit-testing
+  helpers in isolation.
 - The full orchestrator lifecycle is proven end-to-end through a **real
   `node-pty`** against a deterministic fake agent: 3 chained automatic
-  handoffs, lock-file exclusivity between two orchestrators, path-traversal
-  rejection on tampered state, and a 5-cycle drift test proving the
-  Objective section survives write→read→re-render verbatim.
+  handoffs (both the hook-based resume path and, separately, Hermes' typed
+  `'pty-type'` resume path), lock-file exclusivity between two orchestrators,
+  path-traversal rejection on tampered state, and a 5-cycle drift test
+  proving the Objective section survives write→read→re-render verbatim.
 
 What's automated vs. what still needs a human with real CLIs installed is
 tracked honestly in [docs/testing.md](docs/testing.md).
@@ -220,12 +237,15 @@ tracked honestly in [docs/testing.md](docs/testing.md).
 - [docs/adapters.md](docs/adapters.md) — the `Adapter` interface and how to
   write a new one.
 - [docs/testing.md](docs/testing.md) — what's automated vs. what still needs
-  manual verification against real `claude`/`codex` CLIs before a release.
+  manual verification against real `claude`/`codex`/`hermes` CLIs before a
+  release.
 - [docs/gateway-hosts.md](docs/gateway-hosts.md) — verified feasibility
-  spike for Hermes Agent & OpenClaw adapters.
-- [PLAN.md](PLAN.md) — full implementation plan + running progress log.
-- [PLAN-hermes.md](PLAN-hermes.md) — implementation plan for the Hermes
-  Agent adapter (next up).
+  spike for Hermes Agent & OpenClaw adapters (Hermes led to the adapter
+  above; OpenClaw remains a candidate for a future adapter).
+- [PLAN.md](PLAN.md) — full implementation plan + running progress log for
+  the core CLI and the Claude Code/Codex adapters.
+- [PLAN-hermes.md](PLAN-hermes.md) — implementation plan + running progress
+  log for the Hermes Agent adapter.
 
 ## Development
 

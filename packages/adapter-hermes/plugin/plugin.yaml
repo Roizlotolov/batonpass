@@ -1,0 +1,8 @@
+name: batonpass
+version: "0.1.0"
+description: "Batonpass automatic session handoff — writes usage/turn-idle signals for the batonpass orchestrator. Inert outside batonpass-managed sessions (gated on $BATONPASS_DIR)."
+author: batonpass
+hooks:
+  - on_session_start
+  - post_api_request
+  - post_llm_call
