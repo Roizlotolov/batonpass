@@ -57,6 +57,10 @@ node packages/cli/dist/index.js init --agent hermes --user   # Hermes has no pro
 node packages/cli/dist/index.js run hermes
 ```
 
+First time on a real Hermes install? Follow the step-by-step
+[first-run walkthrough](docs/try-hermes.md) — including what changes for
+gateway (Telegram/Discord) users and what to report back.
+
 Use `--agent all` to set up every tool at once, `--user` to install once for
 every project on your machine (required for Hermes), `--uninstall` to
 cleanly remove. Then just work normally — at 75% context the agent writes
@@ -239,6 +243,9 @@ tracked honestly in [docs/testing.md](docs/testing.md).
 - [docs/testing.md](docs/testing.md) — what's automated vs. what still needs
   manual verification against real `claude`/`codex`/`hermes` CLIs before a
   release.
+- [docs/try-hermes.md](docs/try-hermes.md) — first-run walkthrough for
+  testing the Hermes adapter on a real install (including gateway-user
+  caveats).
 - [docs/gateway-hosts.md](docs/gateway-hosts.md) — verified feasibility
   spike for Hermes Agent & OpenClaw adapters (Hermes led to the adapter
   above; OpenClaw remains a candidate for a future adapter).
