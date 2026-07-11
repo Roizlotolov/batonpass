@@ -13,7 +13,51 @@ Watches a running agent session, has the agent write its own handoff before cont
 
 for [Claude Code](https://code.claude.com) · [Codex CLI](https://developers.openai.com/codex)
 
+<img src="docs/assets/handoff-comic.svg" alt="Comic — left panel: an exhausted agent session at 99% context slumped over a laptop at 3 AM asking 'wait… what were we building again?'; right panel: it hands a baton labeled handoff.md to a fresh session at 0% context sprinting away" width="840">
+
 </div>
+
+## Install
+
+```sh
+git clone https://github.com/Roizlotolov/batonpass.git
+cd batonpass
+pnpm install && pnpm build
+```
+
+That's the whole prerequisite (Node ≥22 + pnpm). `node-pty` has a native
+addon — if `pnpm install` fails you're missing a C++ toolchain (Xcode
+command line tools on macOS, `build-essential` on Linux).
+
+Once published to npm this becomes just `npm i -g batonpass` — see
+[Status](#status).
+
+## Quick start
+
+Pick your agent.
+
+### Claude Code
+
+```sh
+node packages/cli/dist/index.js init          # installs hooks + statusline in this project
+node packages/cli/dist/index.js run claude    # spawns `claude` under the orchestrator
+```
+
+### Codex CLI
+
+```sh
+node packages/cli/dist/index.js init --agent codex
+node packages/cli/dist/index.js run codex
+```
+
+Use `--agent all` to set up both, `--user` to install once for every project
+on your machine, `--uninstall` to cleanly remove. Then just work normally —
+at 75% context the agent writes its handoff and a fresh session takes over
+automatically. Trigger one manually anytime with `/handoff` inside the
+session.
+
+> Windows: the Claude Code path is untested and the Codex adapter refuses to
+> install (Codex hooks require a POSIX shell).
 
 ## The problem
 
@@ -96,35 +140,6 @@ verified against the real `claude`/`codex` binaries** — see
 [docs/testing.md](docs/testing.md) for the exact remaining checklist before
 you should rely on it. [PLAN.md](PLAN.md) has the full implementation plan
 and a running progress log.
-
-## Quick start
-
-Once published to npm:
-
-```sh
-npm i -g batonpass
-batonpass init            # installs hooks + statusline for Claude Code in this project
-batonpass run claude       # spawns `claude` under Batonpass's orchestrator
-```
-
-From source, today:
-
-```sh
-git clone https://github.com/Roizlotolov/batonpass.git
-cd batonpass
-pnpm install && pnpm build
-node packages/cli/dist/index.js init
-node packages/cli/dist/index.js run claude
-```
-
-Use `--agent codex` for Codex CLI instead, or `--agent all` to set up both.
-Use `--user` instead of the default project scope to install once for every
-project on your machine.
-
-> `node-pty` has a native addon — if `pnpm install` fails you're missing a
-> C++ toolchain (Xcode command line tools on macOS, `build-essential` on
-> Linux). Windows: the Claude Code path is untested and the Codex adapter
-> refuses to install (Codex hooks require a POSIX shell).
 
 ## Commands
 
