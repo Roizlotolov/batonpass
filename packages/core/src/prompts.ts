@@ -2,35 +2,35 @@ import { REQUIRED_SECTIONS } from './schema.js';
 
 export const HANDOFF_WRITTEN_SENTINEL = 'HANDOFF_WRITTEN';
 
-const TEMPLATE_SKELETON = REQUIRED_SECTIONS.map((s) => `## ${s}`).join('\n');
+/** Section headers as an inline, comma-separated list (no newlines — see `handoffPrompt`). */
+const SECTION_LIST = REQUIRED_SECTIONS.map((s) => `"## ${s}"`).join(', ');
 
 /**
- * Prompt injected into the dying session once context/threshold is hit and the
- * turn is idle. Asks the agent to write its own handoff artifact.
+ * Prompt injected (typed into the PTY) into the dying session once context/threshold is
+ * hit and the turn is idle. Asks the agent to write its own handoff artifact.
+ *
+ * MUST be a single line with no embedded newlines. It is typed into the agent CLI's TUI
+ * followed by a submit (`\r`); a real TUI (e.g. Claude Code) treats embedded newlines as
+ * newlines *within* the input box rather than submits, so a multi-line prompt would sit
+ * there unsubmitted and the handoff cycle would stall. The per-section guidance is folded
+ * into one line with `;` separators; the agent still writes the FILE with real line breaks.
  */
 export function handoffPrompt(artifactPath: string): string {
-  return [
-    'Context is nearly full and this session is about to be replaced by a fresh one with zero memory of this conversation.',
-    '',
-    `Stop what you are doing at a safe point, then write a handoff document to exactly this path: ${artifactPath}`,
-    '',
-    'Follow this exact section template (use these headers verbatim, in this order):',
-    '',
-    TEMPLATE_SKELETON,
-    '',
-    'Guidance for each section:',
-    '- Objective: the overall task, one paragraph. Copy from the previous handoff unless it changed.',
-    '- Current state: what is DONE and verified vs. still in-progress. Be concrete — no vague summaries.',
-    '- Next steps: an ordered list; item 1 must be the exact next action, including file paths.',
-    '- Key decisions: decisions made and WHY, so the next session does not relitigate them.',
-    '- Files touched: path -> one-line description of the role/change.',
-    '- Gotchas & constraints: traps you found, things that look wrong but are intentional, environment quirks.',
-    '- Verification: exact commands to run to confirm the current state (tests, build, lint).',
-    '- Do NOT: explicit anti-instructions for the next session (do not refactor X, do not touch Y).',
-    '',
-    'Be specific and exhaustive — the next session has ZERO memory of this conversation and can only see this document.',
-    `When you have finished writing the file, reply with only the single word: ${HANDOFF_WRITTEN_SENTINEL}`,
-  ].join('\n');
+  return (
+    `Context is nearly full and this session is about to be replaced by a fresh one with ZERO memory of this conversation. ` +
+    `Stop what you are doing at a safe point, then write a handoff document to exactly this path: ${artifactPath} — ` +
+    `a markdown file whose first line is "# Handoff <seq>" and which then uses these level-2 headers verbatim and in this exact order: ${SECTION_LIST}. ` +
+    `Section guidance: Objective = the overall task in one paragraph (copy from the previous handoff unless it changed); ` +
+    `Current state = what is DONE and verified vs. still in-progress, concrete, no vague summaries; ` +
+    `Next steps = an ordered list whose item 1 is the exact next action including file paths; ` +
+    `Key decisions = decisions made and WHY, so the next session does not relitigate them; ` +
+    `Files touched = one "path -> one-line role/change" per file; ` +
+    `Gotchas & constraints = traps you found, things that look wrong but are intentional, environment quirks; ` +
+    `Verification = exact commands to confirm the current state (tests, build, lint); ` +
+    `Do NOT = explicit anti-instructions for the next session. ` +
+    `Be specific and exhaustive — the next session can only see this document. ` +
+    `When you have finished writing the file, reply with only the single word: ${HANDOFF_WRITTEN_SENTINEL}`
+  );
 }
 
 /**
@@ -61,13 +61,14 @@ export function resumePromptPtyType(handoffRelPath: string): string {
   return `Resuming from a previous session. Read ${handoffRelPath} in full before doing anything else and continue from its Next steps; honor its Do NOT section.`;
 }
 
-/** Corrective prompt used for the single retry when a written artifact fails validation. */
+/**
+ * Corrective prompt used for the single retry when a written artifact fails validation.
+ * Like `handoffPrompt`, this is typed into the PTY, so it MUST be a single line with no
+ * embedded newlines (issues are joined with `;`).
+ */
 export function correctivePrompt(artifactPath: string, issues: string[]): string {
-  return [
-    `The handoff document at ${artifactPath} is invalid and cannot be used:`,
-    ...issues.map((i) => `- ${i}`),
-    '',
-    'Please fix it in place (same path, same section headers) and reply again with only:',
-    HANDOFF_WRITTEN_SENTINEL,
-  ].join('\n');
+  return (
+    `The handoff document at ${artifactPath} is invalid and cannot be used: ${issues.join('; ')}. ` +
+    `Please fix it in place (same path, same section headers) and reply again with only: ${HANDOFF_WRITTEN_SENTINEL}`
+  );
 }

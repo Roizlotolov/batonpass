@@ -23,7 +23,6 @@
 //  - When it receives a line that is exactly "/exit", it exits(0).
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import readline from 'node:readline';
 
 const cwd = process.cwd();
 const batonpassDir = path.join(cwd, '.batonpass');
@@ -72,10 +71,11 @@ async function checkResume() {
 }
 
 function extractArtifactPath(line) {
-  const marker = 'write a handoff document to exactly this path: ';
-  const idx = line.indexOf(marker);
-  if (idx === -1) return null;
-  return line.slice(idx + marker.length).trim();
+  // The prompt is now a single line (path followed by more text), so capture the
+  // path as the first whitespace-delimited token after the marker — artifact paths
+  // never contain spaces.
+  const m = line.match(/write a handoff document to exactly this path: (\S+)/);
+  return m ? m[1] : null;
 }
 
 async function writeHandoffArtifact(mdPath) {
@@ -155,8 +155,16 @@ async function main() {
     await markIdle();
   }, TICK_MS);
 
-  const rl = readline.createInterface({ input: process.stdin, terminal: false });
-  rl.on('line', async (line) => {
+  // Read stdin in raw mode and split on \r/\n ourselves, the way a real
+  // interactive TUI does — NOT via readline, which leaves the PTY in canonical
+  // mode where macOS/BSD caps a single input line at MAX_CANON (1024 bytes) and
+  // silently drops longer ones. Batonpass's typed prompts are single-line and can
+  // exceed that; a real raw-mode TUI (Claude/Codex/Hermes) handles them fine, so
+  // the fake agent must too or the e2e wouldn't represent reality.
+  if (process.stdin.isTTY) process.stdin.setRawMode(true);
+  process.stdin.setEncoding('utf8');
+  let inbuf = '';
+  const handleLine = async (line) => {
     await fs.appendFile(receivedLinesPath, `${line}\n`, 'utf8');
     if (line.trim() === '/exit') {
       clearInterval(ticker);
@@ -170,6 +178,15 @@ async function main() {
       await writeUsage();
       await markIdle();
       console.log('HANDOFF_WRITTEN');
+    }
+  };
+  process.stdin.on('data', async (chunk) => {
+    inbuf += chunk;
+    let idx;
+    while ((idx = inbuf.search(/[\r\n]/)) !== -1) {
+      const line = inbuf.slice(0, idx);
+      inbuf = inbuf.slice(idx + 1);
+      await handleLine(line);
     }
   });
 
