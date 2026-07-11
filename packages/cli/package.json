@@ -1,0 +1,29 @@
+{
+  "name": "batonpass",
+  "version": "0.1.0",
+  "description": "Batonpass: automatic session handoff for coding agents (Claude Code, Codex).",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": { "batonpass": "./dist/index.js" },
+  "files": ["dist"],
+  "license": "MIT",
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --dts --clean --shims",
+    "test": "vitest run",
+    "lint": "eslint src test --ext .ts"
+  },
+  "dependencies": {
+    "@batonpass/core": "workspace:*",
+    "@batonpass/adapter-claude-code": "workspace:*",
+    "@batonpass/adapter-codex": "workspace:*",
+    "commander": "^12.1.0",
+    "node-pty": "^1.0.0",
+    "chalk": "^5.3.0"
+  },
+  "devDependencies": {
+    "tsup": "^8.3.5",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.5"
+  }
+}

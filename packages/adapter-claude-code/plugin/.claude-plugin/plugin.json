@@ -1,0 +1,8 @@
+{
+  "name": "batonpass",
+  "version": "0.1.0",
+  "description": "Automatic context handoff for Claude Code — writes a structured handoff before context fills up and injects it into the next session.",
+  "author": { "name": "Batonpass contributors" },
+  "hooks": "./hooks/hooks.json",
+  "commands": ["./commands/handoff.md"]
+}
