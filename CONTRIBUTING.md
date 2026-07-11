@@ -9,7 +9,8 @@ pnpm test
 pnpm lint
 ```
 
-Node 20 or 22. `node-pty` (used by `packages/cli`) has a native addon —
+Node 22 or 24 (pnpm 11 requires Node ≥22.13). `node-pty` (used by
+`packages/cli`) has a native addon —
 `pnpm install` compiles it via `node-gyp`; if that fails, you're missing a
 C++ toolchain (Xcode command line tools on macOS, `build-essential` on Linux).
 

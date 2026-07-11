@@ -7,7 +7,7 @@ Watches a running agent session, has the agent write its own handoff before cont
 
 [![CI](https://github.com/Roizlotolov/batonpass/actions/workflows/ci.yml/badge.svg)](https://github.com/Roizlotolov/batonpass/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Node](https://img.shields.io/badge/node-%E2%89%A520-339933?logo=node.js&logoColor=white)](package.json)
+[![Node](https://img.shields.io/badge/node-%E2%89%A522-339933?logo=node.js&logoColor=white)](package.json)
 [![pnpm](https://img.shields.io/badge/pnpm-11-F69220?logo=pnpm&logoColor=white)](pnpm-workspace.yaml)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
@@ -217,7 +217,8 @@ pnpm test    # vitest: unit + hook-script integration + PTY e2e (no real agent, 
 pnpm lint
 ```
 
-Node 20 or 22. CI runs the full matrix (ubuntu/macos × node 20/22) on every
+Node 22 or 24 (pnpm 11 requires Node ≥22.13). CI runs the full matrix
+(ubuntu/macos × node 22/24) on every
 push and PR — see [.github/workflows/ci.yml](.github/workflows/ci.yml).
 Releases are driven by [changesets](https://github.com/changesets/changesets):
 merging the auto-generated "Version Packages" PR publishes to npm.
